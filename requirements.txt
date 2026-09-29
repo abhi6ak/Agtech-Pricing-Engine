@@ -1,0 +1,14 @@
+apache-airflow==2.7.1
+dbt-postgres
+minio
+rapidfuzz
+prophet
+xgboost
+streamlit
+python-telegram-bot
+psycopg2-binary
+pandas
+requests
+scikit-learn
+pyarrow
+plotly

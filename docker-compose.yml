@@ -1,0 +1,117 @@
+
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.7.1
+  env_file:
+    - .env
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      # We will use another database for DWH inside the same instance for simplicity
+      POSTGRES_MULTIPLE_DATABASES: "airflow,dwh"
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+      - ./scripts/init_db.sh:/docker-entrypoint-initdb.d/init_db.sh
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+
+  minio:
+    image: ubuntu:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: "admin"
+      MINIO_ROOT_PASSWORD: "password123"
+    command: >
+      bash -c "apt-get update && apt-get install -y wget && 
+      wget https://dl.min.io/server/minio/release/linux-amd64/minio && 
+      chmod +x minio && ./minio server /data --console-address ':9001'"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: ubuntu:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      bash -c "
+      apt-get update && apt-get install -y wget;
+      wget https://dl.min.io/client/mc/release/linux-amd64/mc;
+      chmod +x mc;
+      sleep 5;
+      ./mc alias set myminio http://minio:9000 admin password123;
+      ./mc mb myminio/mandi-data || true;
+      ./mc anonymous set public myminio/mandi-data || true;
+      "
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install --no-deps minio pycryptodome argon2-cffi argon2-cffi-bindings 2>/dev/null
+        airflow db init
+        airflow users create -u admin -p admin -f Admin -l User -r Admin -e admin@example.com || true
+        echo "===== Airflow Init Complete ====="
+    environment:
+      <<: *airflow-common-env
+      PYTHONPATH: /home/airflow/.local/lib/python3.8/site-packages:/usr/local/lib/python3.8/site-packages
+
+volumes:
+  postgres-db-volume:
+  minio-data:

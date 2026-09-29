@@ -1,0 +1,12 @@
+agtech_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      user: dwh_user
+      password: dwh_password
+      port: 5432
+      dbname: dwh
+      schema: public
+      threads: 4

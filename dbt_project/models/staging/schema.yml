@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: stg_mandi_prices
+    description: "Staging model for daily mandi prices"
+    columns:
+      - name: min_price
+        tests:
+          - not_null
+      - name: modal_price
+        tests:
+          - not_null
+  
+  - name: fact_daily_mandi_prices
+    description: "Fact table for mandi prices"
+    columns:
+      - name: modal_price
+        tests:
+          - not_null
